@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<strings>
+  <!-- 30xxx Plugin global stuff -->
+  <string id="30000">crispyloaf</string>
+  <!-- 31xxx Settings -->
+  <string id="31000">Settings</string>
+  <string id="31001">Username/Email</string>
+  <string id="31002">Password</string>
+  <string id="31010">Stream Settings</string>
+  <string id="31011">Video Format</string>
+  <string id="31012">Video Quality</string>
+</strings>

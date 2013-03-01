@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<settings>
+    <category label="31000">
+        <setting label="31001" type="text" id="username" default="" />
+        <setting label="31002" type="text" id="password" default="" option="hidden" />
+    </category>
+    <category label="31010">
+        <setting label="31011" type="number" id="video_format" default="104" />
+        <setting label="31012" type="number" id="video_quality" default="20" />
+    </category>
+</settings>
