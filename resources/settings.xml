@@ -3,9 +3,9 @@
     <category label="31000">
         <setting label="31001" type="text" id="username" default="" />
         <setting label="31002" type="text" id="password" default="" option="hidden" />
+        <setting label="31003" type="bool" id="hide_clips" default="true" />
     </category>
     <category label="31010">
-        <setting label="31011" type="number" id="video_format" default="104" />
-        <setting label="31012" type="number" id="video_quality" default="20" />
+        <setting label="31011" type="labelenum" id="stream_quality" values="1080p|720p|480p|360p" />
     </category>
 </settings>

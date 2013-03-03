@@ -24,9 +24,12 @@ import sys
 from xbmcswift2 import xbmc
 from xbmcswift2.logger import setup_log
 
+setup_log('crunchyroll')
+
 from crunchyroll.constants import META
 from crunchyroll.models import DictModel
 from crunchyroll.apis.meta import MetaApi
+from crunchyroll.util import xml_node_to_string
 
 logger = setup_log(__name__)
 
@@ -69,54 +72,101 @@ class CrispyLoafHelper(object):
         ]
         return categories
 
+    @save_state
     def get_series_list(self, category):
         series = getattr(self._api, 'list_%s_series' % category)(sort=META.SORT_ALPHA)
         return map(self._make_series_item, series)
 
+    @save_state
     def get_episode_list(self, series_id):
-        series = DictModel({'series_id': series_id})
-        episodes = self._api.list_media(series, sort=META.SORT_ASC)
+        episodes = self._api.list_media(self._make_mock_series(series_id),
+            sort=META.SORT_ASC)
         return map(self._make_episode_item, (e \
             for e in episodes \
-                if e.episode_number and e.free_available))
+                if self._filter_episode(e)))
 
-    # @save_state
+    @save_state
     def play_episode(self, media_id):
-        video_format = int(self._plugin.get_setting('video_format'))
-        video_quality = int(self._plugin.get_setting('video_quality'))
-        stream = self._api.get_media_stream(DictModel({'media_id': media_id}),
+        media_item = self._make_mock_media(media_id)
+        video_quality_setting = self._plugin.get_setting('stream_quality')
+        logger.info('Trying to find stream params for video quality: %s',
+            video_quality_setting)
+        video_formats = self._api.get_stream_formats(media_item)
+        try:
+            video_format, video_quality = video_formats[video_quality_setting]
+        except KeyError as err:
+            logger.error('Got error loading stream format/quality: %s',
+                err)
+            logger.info('Using default format and quality')
+            video_format = 106
+            video_quality = 60
+        logger.info('Using video format/quality: %d/%d', video_format, video_quality)
+        stream = self._api.get_media_stream(media_item,
             format=video_format, quality=video_quality)
+        logger.debug('Got stream object: %r', stream)
+        if stream.stream_info.is_upsell:
+            logger.error('Got upsell tag, redirecting')
+            self._plugin.notify('Content is only available to premium members')
+            return self._plugin.redirect(self._plugin.url_for('index'))
+        rtmp_data = stream.stream_info.rtmp_data
+        logger.debug('Got RTMP data: %r', rtmp_data)
+        if rtmp_data is None:
+            logger.error('RTMP data was none, redirecting to index')
+            self._plugin.notify('Failed to load RTMP stream data')
+            return self._plugin.redirect(self._plugin.url_for('index'))
         item = {
             'label': stream.findfirst(
                 './/{default}preload/media_metadata/episode_title').text,
-            'path': self._make_rtmp_url(stream.rtmp_data),
+            'path': self._make_rtmp_url(rtmp_data),
             'is_playable': True,
         }
         sub_file = self._get_subtitle_file(stream, media_id)
-        logger.info('Playing #%s ("%s") at f:%d/q:%d with sub file: %s',
+        logger.info('Playing #%s ("%s") at f:%d/q:%d with sub file: %r',
             media_id, item['label'], video_format, video_quality, sub_file)
         result = self._plugin.play_video(item)
-        self._add_subtitles(sub_file)
+        if sub_file is not None:
+            self._add_subtitles(sub_file)
         return result
 
     def get_queue(self, media_types):
         return map(self._make_series_item, self._api.list_queue(media_types))
 
+    def _filter_episode(self, episode):
+        if self._plugin.get_setting('hide_clips') == 'true':
+            if not episode.episode_number:
+                return False
+        if not episode.premium_available:
+            return False
+        if not self._api.is_premium(episode.media_type) and not episode.free_available:
+            return False
+        return True
+
     def _init(self):
+        logger = self._plugin.log
+        logger.info('Initializing helper')
         username = self._plugin.get_setting('username')
         password = self._plugin.get_setting('password')
         if username and password:
+            logger.debug('Found username and password, using for api init')
             self._api = MetaApi(username=username, password=password)
         else:
+            logger.debug('No username and/or password found, init api without')
             self._api = MetaApi()
         state = self._storage.get('api_state')
-        if state is not None:
-            self._api.set_state(state)
+        if state:
+            logger.info('Found previous state, loading into api: %r', state)
+            # self._api.set_state(state)
 
     def _add_subtitles(self, sub_file_name):
         return wait_for_playing().setSubtitles(sub_file_name)
 
     def _get_subtitle_file(self, stream, media_id):
+        try:
+            sub_id = stream.default_subtitles.id
+        except ValueError:
+            logger.info('No subtitle tag found for media ID #%s, assuming hard-subs',
+                media_id)
+            return None
         sub_file = self._plugin.temp_fn('cr_%s_%s.ass' % (media_id, stream.default_subtitles.id))
         if not os.path.exists(sub_file):
             try:
@@ -145,3 +195,9 @@ class CrispyLoafHelper(object):
         fmt_string = '{url} swfurl={swf_url} swfvfy=1 token={token} playpath={file} ' \
             'pageurl={page_url} tcUrl={url}'
         return fmt_string.format(**rtmp_data)
+
+    def _make_mock_media(self, media_id):
+        return DictModel({'media_id': media_id})
+
+    def _make_mock_series(self, series_id):
+        return DictModel({'series_id': series_id})
